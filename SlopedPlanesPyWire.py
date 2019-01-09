@@ -28,13 +28,19 @@ from SlopedPlanesPy import _Py
 __title__ = "SlopedPlanes Macro"
 __author__ = "Damian Caceres Moreno"
 __url__ = "http://www.freecadweb.org"
+__version__ = ""
 
 
 class _PyWire(_Py):
 
-    '''The complementary python object class for wires'''
+    '''The complementary python object class for wires.
+    Two consecutive edges of the same wire could make a reflex corner.
+    The edges of the wire could make alignments with others edges,
+    even belonging to different wires.
+    The exterior wires round counterclockwise, from the lowerleft point.
+    The interior wires round clockwise, from the upperleft point.'''
 
-    def __init__(self, numWire):
+    def __init__(self, numWire, mono=True):
 
         ''''''
 
@@ -43,438 +49,628 @@ class _PyWire(_Py):
         self.planes = []
         self.coordinates = []
         self.shapeGeom = []
-        self.reset = False
+        self.reset = True
+        self.wire = None
+        self.mono = mono
 
     @property
     def numWire(self):
 
-        ''''''
+        '''numWire(self)'''
 
         return self._numWire
 
     @numWire.setter
     def numWire(self, numWire):
 
-        ''''''
+        '''numWire(self, numWire)'''
 
         self._numWire = numWire
 
     @property
     def reflexs(self):
 
-        ''''''
+        '''reflexs(self)'''
 
         return self._reflexs
 
     @reflexs.setter
     def reflexs(self, reflexs):
 
-        ''''''
+        '''reflexs(self, reflexs)'''
 
         self._reflexs = reflexs
 
     @property
     def planes(self):
 
-        ''''''
+        '''planes(self)'''
 
         return self._planes
 
     @planes.setter
     def planes(self, planes):
 
-        ''''''
+        '''planes(self, planes)'''
 
         self._planes = planes
 
     @property
     def coordinates(self):
 
-        ''''''
+        '''coordinates(self)'''
 
         return self._coordinates
 
     @coordinates.setter
     def coordinates(self, coordinates):
 
-        ''''''
+        '''coordinates(self, coordinates)'''
 
         self._coordinates = coordinates
 
     @property
     def shapeGeom(self):
 
-        ''''''
+        '''shapeGeom(self)'''
 
         return self._shapeGeom
 
     @shapeGeom.setter
     def shapeGeom(self, shapeGeom):
 
-        ''''''
+        '''shapeGeom(self, shapeGeom)'''
 
         self._shapeGeom = shapeGeom
 
     @property
     def reset(self):
 
-        ''''''
+        '''reset(self)'''
 
         return self._reset
 
     @reset.setter
     def reset(self, reset):
 
-        ''''''
+        '''reset(self, reset)'''
 
         self._reset = reset
 
-    def planning(self):
+    @property
+    def wire(self):
 
-        '''planning(self):
-        Transfers to PyPlane
-        Arranges the reflex and plane ranges
-        '''
+        '''wire(self)'''
 
-        for pyPlane in self.planes:
-            if pyPlane.geomAligned:
+        return self._wire
+
+    @wire.setter
+    def wire(self, wire):
+
+        '''wire(self, wire)'''
+
+        self._wire = wire
+
+    @property
+    def mono(self):
+
+        '''mono(self)'''
+
+        return self._mono
+
+    @mono.setter
+    def mono(self, mono):
+
+        '''mono(self, mono)'''
+
+        self._mono = mono
+
+    def planning(self, reset):
+
+        '''planning(self, reset):
+        Transfers to PyPlane.
+        Arranges the reflex range and its planes ranges.'''
+
+        if len(self.coordinates) == 2:
+
+            pyPlane = self.planes[0]
+            pyPlane.planning(self, True)
+
+        else:
+
+            reflexList = self.reflexs
+
+            for pyPlane in self.planes:
                 pyPlane.planning(self)
 
-        reset = _Py.pyFace.reset
-        if reset:
-            for pyReflex in self.reflexs:
-                pyReflex.rangging(self)
-                direction = "forward"
+            if reset:
+                for pyReflex in reflexList:
+                    pyReflex.rangging(self)
+
+            pyPlaneList = self.planes
+
+            for pyReflex in reflexList:
                 for pyPlane in pyReflex.planes:
-                    pyPlane.rangging(self, direction)
-                    direction = "backward"
+
+                    cc = []
+                    for ran in pyPlane.rango:
+                        c = []
+                        for nn in ran:
+                            pyPl = pyPlaneList[nn]
+                            c.append(pyPl)
+                        cc.append(c)
+                    pyPlane.rangoPy = cc
+
+    def virtualizing(self):
+
+        '''virtualizing(self)
+        Assigns the forward and backward to the reflexs.
+        Transfers to PyReflex'''
+
+        # print '###### virtualizing wire ', self.numWire
+
+        reflexList = self.reflexs[:]
+
+        reflexList.reverse()
+
+        controlList = []
+
+        for pyReflex in reflexList:
+
+            if not pyReflex.lines:
+
+                [pyR, pyOppR] = pyReflex.planes
+                # print '### ', (pyR.numGeom, pyOppR.numGeom)
+
+                if pyOppR in controlList:
+                    # print 'A'
+
+                    pyReflex.addValue('lines', pyR.forward, 'forward')
+                    pyReflex.addValue('lines', pyOppR.backward, 'backward')
+
+                else:
+                    # print 'B'
+
+                    if pyOppR.aligned:
+                        # print 'B1'
+
+                        pyReflex.addValue('lines', pyR.forward, 'forward')
+                        pyReflex.addValue('lines', pyOppR.backward, 'backward')
+
+                    else:
+                        # print 'B2'
+
+                        pyReflex.addValue('lines', pyR.forward, 'forward')
+                        pyReflex.addValue('lines', pyOppR.forward, 'backward')
+
+                controlList.append(pyR)
+
+            else:
+
+                break
+
+        for pyReflex in reflexList:
+
+            pyReflex.virtualizing()
 
     def trimming(self):
 
         '''trimming(self)
-        The reflex corners act like a dam
-        blocking the progress of others planes'''
+        The reflex corners acts like a dam, blocking the path to others planes,
+        except another reflex plane or an alignment.'''
+
+        # print '###### trimming reflexs numWire ', self.numWire
+
+        pyPlaneList = self.planes
+        tolerance = _Py.tolerance
 
         for pyReflex in self.reflexs:
+
+            num = -1
             for pyPlane in pyReflex.planes:
-                # print 'cutter ', pyPlane.numGeom
+                num += 1
+                # print '### cutter ', pyPlane.numGeom
 
-                angle = pyPlane.angle
-                numWire = pyPlane.numWire
-                if ((numWire == 0 and angle > 90) or
-                   (numWire > 0 and angle < 90)):
-                    return
-
-                rango = pyPlane.rango
+                numGeom = pyPlane.numGeom
                 enormousShape = pyPlane.enormousShape
-                pyPlaneList = self.planes
-                for ran in rango:
-                    for nG in ran:
-                        # print 'cutted ', nG
-                        pyPl = pyPlaneList[nG]
 
-                        # TODO pyPl numWire and angle
+                pyOppPlane = pyReflex.planes[num - 1]
 
-                        if not pyPl.reflexed:
+                rango, rangoPy, oppRango, oppRangoPy, nextRango =\
+                    [], [], [], [], []
+
+                if num == 0:
+                    # print 'A'
+
+                    rear = pyReflex.rear[0]
+                    oppRear = pyReflex.rear[1]
+                    forward = pyReflex.lines[0]
+
+                    if rear is not None:
+                        # print 'A1'
+                        rango = pyPlane.rango[0]
+                        rangoPy = pyPlane.rangoPy[0]
+
+                    if oppRear is not None:
+                        # print 'A2'
+                        oppRango = pyOppPlane.rango[-1]
+                        oppRangoPy = pyOppPlane.rangoPy[-1]
+
+                        if len(pyOppPlane.rango) > 1:
+                            nextRango = pyOppPlane.rango[0]
+
+                    if self.numWire > 0:
+
+                        try:
+                            rr = pyOppPlane.rear[-1]
+
+                        except IndexError:
+                            pass
+
+                        else:
+                            if rr is not oppRear:
+                                pyPl = pyPlaneList[rr]
+
+                                pyPl.cuttingPyth([enormousShape])
+                                pyPl.control.append(numGeom)
+
+                                pl = pyPl.shape.copy()
+                                pl = pl.cut([pyOppPlane.enormousShape],
+                                            tolerance)
+                                point = self.coordinates[rr + 1]
+                                pl = self.selectFacePoint(pl, point)
+
+                                pyPlane.cuttingPyth([pl])
+                                pyPlane.control.append(rr)
+
+                else:
+                    # print 'B'
+
+                    rear = pyReflex.rear[1]
+                    oppRear = pyReflex.rear[0]
+                    forward = pyReflex.lines[-1]
+
+                    if rear is not None:
+                        # print 'B1'
+                        rango = pyPlane.rango[-1]
+                        rangoPy = pyPlane.rangoPy[-1]
+
+                    if oppRear is not None:
+                        # print 'B2'
+                        oppRango = pyOppPlane.rango[0]
+                        oppRangoPy = pyOppPlane.rangoPy[0]
+
+                        if len(pyOppPlane.rango) > 1:
+                            nextRango = pyOppPlane.rango[-1]
+
+                    if self.numWire > 0:
+
+                        try:
+                            rr = pyOppPlane.rear[0]
+
+                        except IndexError:
+                            pass
+
+                        else:
+                            if rr is not oppRear:
+                                pyPl = pyPlaneList[rr]
+
+                                pyPl.cuttingPyth([enormousShape])
+                                pyPl.control.append(numGeom)
+
+                                pl = pyPl.shape.copy()
+                                pl = pl.cut([pyOppPlane.enormousShape],
+                                            tolerance)
+                                point = self.coordinates[rr]
+                                pl = self.selectFacePoint(pl, point)
+
+                                pyPlane.cuttingPyth([pl])
+                                pyPlane.control.append(rr)
+
+                # print 'rear ', rear
+                # print 'rango ', rango
+                # print 'rangoPy ', rangoPy
+                # print 'forward ', (self.roundVector(forward.firstVertex(True).Point), self.roundVector(forward.lastVertex(True).Point))
+                # print 'oppRear ', oppRear
+                # print 'oppRango ', oppRango
+                # print 'oppRangoPy ', oppRangoPy
+                # print 'nextRango ', nextRango
+
+                if pyPlane.secondRear:
+
+                    if num == 0:
+                        sR = pyPlane.secondRear[0]
+                    else:
+                        sR = pyPlane.secondRear[-1]
+                    if sR in rango:
+                        # print 'secondRear'
+                        pyRearPl = pyPlaneList[rear]
+                        direction, geom = pyRearPl.direction(self, rear)
+                        firstParam = geom.FirstParameter
+                        lastParam = geom.LastParameter
+                        geomCopy = geom.copy()
+                        geomCopy.translate(-1 * _Py.size * direction)
+                        scale = 500
+                        giantPlane =\
+                            pyRearPl.doPlane(direction, self, geomCopy,
+                                             firstParam, lastParam,
+                                             scale, False)
+                        gS = pyPlane.geomShape
+                        enormousShape = enormousShape.copy()
+                        enormousShape =\
+                            self.cutting(enormousShape, [giantPlane], gS)
+
+                for nG, pyPl in zip(rango, rangoPy):
+                    control = pyPl.control
+
+                    if numGeom not in control:
+                        # print '# cutted ', nG
+
+                        # TODO backRear
+
+                        if not pyPl.aligned and nG in nextRango:
+                            # print '0'
+                            # rango doesn't cut with nextRango G
+
+                            control.append(numGeom)
+                            pyPlane.control.append(nG)
+
+                        elif not pyPl.reflexed:
+                            # print 'a'
 
                             pyPl.trimming(enormousShape)
+                            control.append(numGeom)
 
-                        elif pyPl.aligned:
+                        elif pyPl.aligned or pyPl.choped:
+                            # print 'b'
 
                             pass
 
                         else:
+                            # print 'c, interference between reflexs'
 
-                            forward = pyPlane.forward
-                            gS = pyPlane.geomShape
-                            forw = pyPl.forward
-                            section = forward.section([forw, gS],
-                                                      _Py.tolerance)
+                            procc = True
+                            pyRList = pyPl.reflexedList
+                            # print pyRList
 
-                            if (not section.Edges and
-                               len(section.Vertexes) == 1):
+                            for pyR in pyRList:
 
-                                section = forw.section(section.Vertexes,
-                                                       _Py.tolerance)
+                                section = forward.section(pyR.lines, tolerance)
 
-                                if not section.Vertexes:
+                                if section.Vertexes:
 
-                                    procc = True
+                                    procc = False
+                                    break
 
-                                    nWire = pyPl.numWire
-                                    nGeom = pyPl.numGeom
-                                    pyRList =\
-                                        self.selectAllReflex(nWire,
-                                                             nGeom)
+                            if procc:
+                                # print 'procc'
+                                pyPl.trimming(enormousShape)
+                                control.append(numGeom)
 
-                                    for pyR in pyRList:
-                                        if not procc:
-                                            break
-                                        for pyP in pyR.planes:
-                                            if pyP != pyPl:
-                                                ff = pyP.forward
-                                                section =\
-                                                    ff.section([forward],
-                                                               _Py.tolerance)
+                            else:
+                                # print 'no procc'
+                                pyPl.trimmingTwo(enormousShape)
 
-                                                if section.Vertexes:
-                                                    procc = False
-                                                    break
-
-                                    if procc:
-                                        # print 'procc'
-                                        pyPl.trimming(enormousShape)
+                    # rango doesn't cut with oppRango
+                    if not pyPl.reflexed:
+                        for nn, pyP in zip(oppRango, oppRangoPy):
+                            if nn not in control:
+                                if not pyP.reflexed:
+                                    control.append(nn)
 
     def priorLater(self):
 
-        '''priorLater(self)
-        '''
+        '''priorLater(self)'''
+
+        # print '###### priorLater wire ', self.numWire
 
         pyPlaneList = self.planes
         lenWire = len(pyPlaneList)
         numWire = self.numWire
-        for pyPlane in pyPlaneList:
 
+        mono = self.mono
+
+        for pyPlane in pyPlaneList:
             if not pyPlane.aligned:
-                plane = pyPlane.shape
 
                 numGeom = pyPlane.numGeom
-                print 'numGeom ', numGeom
-                print 'reflexed ', pyPlane.reflexed
-                print 'choped ', pyPlane.choped
-                print 'arrow ', pyPlane.arrow
+                control = pyPlane.control
+                # print '### numGeom ', numGeom
 
-                prior = self.sliceIndex(numGeom-1, lenWire)
-                later = self.sliceIndex(numGeom+1, lenWire)
+                prior = self.sliceIndex(numGeom - 1, lenWire)
+                later = self.sliceIndex(numGeom + 1, lenWire)
 
                 pyPrior = self.selectBasePlane(numWire, prior)
                 pyLater = self.selectBasePlane(numWire, later)
+
                 bigPrior = pyPrior.bigShape
                 bigLater = pyLater.bigShape
 
-                print'prior ', (pyPrior.numWire, pyPrior.numGeom)
-                print'later ', (pyLater.numWire, pyLater.numGeom)
+                # print'prior ', (pyPrior.numWire, pyPrior.numGeom)
+                # print'later ', (pyLater.numWire, pyLater.numGeom)
 
                 gS = pyPlane.geomShape
-                cutterList = []
+                cutterList = []     # shape
+                cutList = []        # simulatedShape
 
-                if pyPlane.arrow:
-                    print'A'
+                arrow = pyPlane.arrow
 
-                    if not pyPrior.reflexed:
-                        print'1'
-                        cutterList.append(bigPrior)
+                if pyPlane.reflexed:
+                    # print 'B reflexed'
 
-                    if not pyLater.reflexed:
-                        print'2'
-                        cutterList.append(bigLater)
+                    if prior not in control:
 
-                elif pyPlane.reflexed:
-                    print'B'
-
-                    if not pyPrior.reflexed:
-                        print'1'
-                        cutterList.append(bigPrior)
-                    elif not (pyPrior.choped or pyPrior.aligned):
-                        pyR = self.selectReflex(self.numWire,
-                                                  pyPlane.numGeom,
-                                                  pyPrior.numGeom)
-                        if not pyR:
-                            print '11'
+                        if not pyPrior.reflexed or (mono and not arrow and not (pyPlane.choped and pyPrior.aligned)):
+                            # print '1'
                             cutterList.append(bigPrior)
+                            control.append(prior)
+                            if pyPlane.simulatedShape:
+                                cutList.append(bigPrior)
 
-                    if not pyLater.reflexed:
-                        print'2'
-                        cutterList.append(bigLater)
-                    elif not (pyLater.choped or pyLater.aligned):
-                        pyR = self.selectReflex(self.numWire,
-                                                  pyPlane.numGeom,
-                                                  pyLater.numGeom)
-                        if not pyR:
-                            print '21'
+                        else:
+                            # print '11'
+
+                            if not pyPrior.aligned:
+
+                                pyRPrior = pyPlane.selectReflex(prior)
+
+                                if not pyRPrior:
+                                    # print 'reflex successives prior'
+
+                                    if pyPlane.arrow:
+                                        nn = self.sliceIndex(prior - 1, lenWire)
+                                        pyPl = pyPlaneList[nn]
+                                        if numGeom not in pyPl.rear:
+                                            # print '111'
+                                            cutterList.append(bigPrior)
+
+                                    else:
+                                        cutterList.append(bigPrior)
+                                        if pyPlane.simulatedShape:
+                                            # print 'simulatedShape'
+                                            cutList.append(bigPrior)
+
+                    if later not in control:
+
+                        if not pyLater.reflexed or (mono and not arrow and not (pyPlane.choped and pyLater.aligned)):
+                            # print '2'
                             cutterList.append(bigLater)
+                            control.append(later)
+                            if pyPlane.simulatedShape:
+                                cutList.append(bigLater)
+
+                        else:
+                            # print '21'
+
+                            if not pyLater.aligned:
+                                pyRLater = pyPlane.selectReflex(later)
+
+                                if not pyRLater:
+                                    # print 'reflex succesives later'
+
+                                    if pyPlane.arrow:
+                                        nn = self.sliceIndex(later + 1, lenWire)
+                                        pyPl = pyPlaneList[nn]
+                                        if numGeom not in pyPl.rear:
+                                            # print '211'
+                                            cutterList.append(bigLater)
+
+                                    else:
+                                        cutterList.append(bigLater)
+                                        if pyPlane.simulatedShape:
+                                            # print 'simulatedShape'
+                                            cutList.append(bigLater)
+
+                elif pyPlane.arrow:
+                    # print 'A arrow'
+
+                    if prior not in control:
+                        if not pyPrior.reflexed:
+                            # print '1'
+                            cutterList.append(bigPrior)
+                            control.append(prior)
+                        else:
+                            # print '11'
+                            nn = self.sliceIndex(prior - 1, lenWire)
+                            pyPl = pyPlaneList[nn]
+                            if numGeom not in pyPl.rear:
+                                # print '111'
+                                cutterList.append(bigPrior)
+
+                    if later not in control:
+                        if not pyLater.reflexed:
+                            # print '2'
+                            cutterList.append(bigLater)
+                            control.append(later)
+                        else:
+                            # print '21'
+                            nn = self.sliceIndex(later + 1, lenWire)
+                            pyPl = pyPlaneList[nn]
+                            if numGeom not in pyPl.rear:
+                                # print '211'
+                                cutterList.append(bigLater)
 
                 else:
-                    print'C'
-                    cutterList = [bigPrior, bigLater]
+                    # print 'C no arrow no reflexed'
+
+                    cutterList = []
+
+                    if not prior in control:
+                        if not (pyPrior.aligned or pyPrior.choped):
+                            # print '1'
+                            cutterList.append(bigPrior)
+                            if not pyPrior.reflexed:
+                                # print '11'
+                                control.append(prior)
+
+                    if not later in control:
+                        if not (pyLater.aligned or pyLater.choped):
+                            # print '2'
+                            cutterList.append(bigLater)
+                            if not pyLater.reflexed:
+                                # print '21'
+                                control.append(later)
 
                 if cutterList:
-                    print'D'
-                    plane = self.cutting(plane, cutterList, gS)
-                    pyPlane.shape = plane
+                    # print 'D cutterList shape ', cutterList
+                    pyPlane.cuttingPyth(cutterList)
+                    # print 'pyPlane.shape ', pyPlane.shape
+
+                if cutList:
+                    # print 'E cutList simulatedShape ', cutList
+                    simulated = pyPlane.simulatedShape
+                    simulated = self.cutting(simulated, cutList, gS)
+                    pyPlane.simulatedShape = simulated
 
     def simulating(self):
 
-        '''simulating(self)
-        '''
-
-        for pyReflex in self.reflexs:
-            pyReflex.virtualizing()
+        '''simulating(self)'''
 
         for pyReflex in self.reflexs:
             pyReflex.simulating()
 
-    def preOrdinaries(self):
-
-        '''preOrdinaries(self)
-        '''
-
-        reflexList = []     # attribute
-        for pyReflex in self.reflexs:
-            [pyR, pyOppR] = pyReflex.planes
-            reflexList.extend([pyR.numGeom, pyOppR.numGeom])
-
-        print 'reflexList ', reflexList
-
-        for pyReflex in self.reflexs:
-            pyReflex.preOrdinaries(reflexList)
-
-    def preReflexs(self):
-
-        '''preReflexs(self)
-        '''
-
-        for pyReflex in self.reflexs:
-            pyReflex.preReflexs()
-
     def reflexing(self):
 
-        '''reflexing(self)
-        '''
+        '''reflexing(self)'''
 
-        for pyReflex in self.reflexs:
-            pyReflex.reflexing(self)
+        # print '###### reflexing wire ', self.numWire
 
-        for pyReflex in self.reflexs:
-            pyReflex.solveReflex()
+        if not self.mono:
 
-        for pyReflex in self.reflexs:
-            pyReflex.rearReflex(self)
+            for pyReflex in self.reflexs:
+                pyReflex.preProcess(self)
+            # self.printControl('preProcess')
 
-        for pyReflex in self.reflexs:
-            pyReflex.compounding()
+            for pyReflex in self.reflexs:
+                pyReflex.reflexing(self)
 
-    def reviewing(self):
+            for pyReflex in self.reflexs:
+                pyReflex.solveReflex(self)
+                # self.printControl('solveReflex')
+            # self.printControl('solveReflex')
 
-        '''reviewing(self)
-        '''
+            for pyReflex in self.reflexs:
+                pyReflex.postProcess(self)
+            # self.printControl('postProcess')
 
-        for pyReflex in self.reflexs:
-            pyReflex.reviewing()
-
-    def clasifyReflexPlanes(self):
-
-        '''clasifyReflexPlanes(self)
-        '''
-
-        solved, unsolved = [], []
-
-        for pyReflex in self.reflexs:
-            for pyPlane in pyReflex.planes:
-                if pyPlane.unsolved:
-                    if pyPlane not in unsolved:
-                        unsolved.append(pyPlane)
-                else:
-                    if pyPlane not in solved:
-                        solved.append(pyPlane)
-
-        return solved, unsolved
-
-    def reSolveReflexs(self, solved=[], unsolved=[], counter=0):
-
-        '''reSolveReflexs(self, solved=[], unsolved=[], counter=0)
-        '''
-
-        # print 'solved ', [p.numGeom for p in solved]
-        # print 'unsolved ', [p.numGeom for p in unsolved]
-
-        if counter > len(solved) + len(unsolved):
-            return
-
-        cutterList = [pyPl.shape for pyPl in solved]  # if not pyPl.aligned
-
-        for pyPlane in unsolved[:]:
-            # print 'a', pyPlane.numGeom
-            plane = pyPlane.shape
-            gS = pyPlane.geomShape
-
-            plane = self.cutting(plane, cutterList, gS)
-            pyPlane.shape = plane
-
-            if pyPlane.isUnsolved():
-                # print 'aa'
-                pass
-
-            else:
-                # print 'ab'
-                unsolved.remove(pyPlane)
-                solved.append(pyPlane)
-
-        if not unsolved:
-            # print 'return'
-            return
-
-        counter += 1
-        self.reSolveReflexs(solved, unsolved, counter)
-
-    def betweenReflexs(self):
-
-        '''betweenReflexs(self)
-        '''
-
-        pyReflexList = self.reflexs
-        lenR = len(pyReflexList)
-        num = -1
-        for pyReflex in pyReflexList:
-            num += 1
-            cutterList = []
-            prior = self.sliceIndex(num-1, lenR)
-            later = self.sliceIndex(num+1, lenR)
-            if prior != num:
-                pyPriorReflex = pyReflexList[prior]
-                cutterList.append(pyPriorReflex)
-            if later != num and later != prior:
-                pyLaterReflex = pyReflexList[later]
-                cutterList.append(pyLaterReflex)
-
-            for pyPlane in pyReflex.planes:
-
-                if not pyPlane.aligned:
-
-                    plane = pyPlane.shape
-
-                    if len(plane.Faces) == 1:
-
-                        cutList = []
-                        for pyR in cutterList:
-                            for pyPl in pyR.planes:
-                                if pyPl != pyPlane:
-                                    cutList.append(pyPl.shape)
-
-                        gS = pyPlane.geomShape
-                        plane = self.cutting(plane, cutList, gS)
-                        pyPlane.shape = plane
-
-    def rearing(self):
-
-        '''rearing(self)
-        '''
+            for pyReflex in self.reflexs:
+                pyReflex.postProcessTwo(self)
+            # self.printControl('postProcessTwo')
 
         for pyReflex in self.reflexs:
             pyReflex.rearing(self)
 
+        # '''
+
+        # en interiores un reflexed con una sola trasera da lugar a innecesaria repeticiòn
+
     def ordinaries(self):
 
-        '''ordinaries(self)
-        '''
+        '''ordinaries(self)'''
 
         for pyPlane in self.planes:
-            if not (pyPlane.reflexed and not pyPlane.aligned):
-                # no reflexed and no choped. Yes ordinarie and aligned
-                print pyPlane.numGeom
-                print pyPlane.reflexed
-                print pyPlane.choped
-                print pyPlane.aligned
+            if not (pyPlane.choped and not pyPlane.aligned):
                 if pyPlane.shape:
-                    print '############### ordinaries ', pyPlane.numGeom
-                    pyPlane.ordinaries(self)
+                    if not pyPlane.fronted:
+                        # print '############ ordinaries ', (pyPlane.numWire, pyPlane.numGeom), pyPlane.shape
+                        pyPlane.ordinaries(self)

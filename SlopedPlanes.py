@@ -22,31 +22,28 @@
 # *****************************************************************************
 
 
-# import rpdb2
-from os import path
-from math import degrees
 import FreeCAD
-import FreeCADGui
 import Part
 from SlopedPlanesPy import _Py
 from SlopedPlanesPyFace import _PyFace
 from SlopedPlanesPyWire import _PyWire
 from SlopedPlanesPyPlane import _PyPlane
-from SlopedPlanesTaskPanel import _TaskPanel_SlopedPlanes
+if FreeCAD.GuiUp:
+    from os import path
+    import FreeCADGui
+    from SlopedPlanesTaskPanel import _TaskPanel_SlopedPlanes
 
 
 __title__ = "SlopedPlanes Macro"
 __author__ = "Damian Caceres Moreno"
 __url__ = "http://www.freecadweb.org"
+__version__ = ""
 
 
-# rpdb2.start_embedded_debugger("test")
+def makeSlopedPlanes(sketch, slope=45.0, slopeList=[]):
 
-
-def makeSlopedPlanes(sketch):
-
-    '''makeSlopedPlanes(sketch)
-    makes the SlopedPlanes object from a sketch or a DWire'''
+    '''makeSlopedPlanes(sketch, slope=45.0, slopeList=[])
+    makes the SlopedPlanes object from a sketch or a DWire.'''
 
     if hasattr(sketch, 'Proxy'):
         if sketch.Proxy.Type != 'Wire':
@@ -57,54 +54,141 @@ def makeSlopedPlanes(sketch):
 
     slopedPlanes =\
         FreeCAD.ActiveDocument.addObject("Part::FeaturePython", "SlopedPlanes")
-    _SlopedPlanes(slopedPlanes)
+
+    _SlopedPlanes(slopedPlanes, slope)
     _ViewProvider_SlopedPlanes(slopedPlanes.ViewObject)
+
+    if slope:
+        try:
+            ang = float(slope)
+            slopedPlanes.Slope = ang
+        except ValueError:
+            pass
+
+    if slopeList:
+        slopedPlanes.Proxy.slopeList = slopeList
+
     slopedPlanes.Base = sketch
+    sketch.ViewObject.Visibility = False
 
     return slopedPlanes
 
 
 class _SlopedPlanes(_Py):
 
-    '''The SlopedPlanes object Class'''
+    '''The Class of the FreeCAD scripted object SlopedPlanes.
+    Requieres a sketch or DWire as base. The base must support the FaceMaker.
+    The angles numeration corresponds to the SlopedPlanes shape faces.'''
 
-    def __init__(self, slopedPlanes):
+    def __init__(self, slopedPlanes, slope=45.0):
 
         '''__init__(self, slopedPlanes)
         Initializes the properties of the SlopedPlanes object and its Proxy.
         The Proxy stores:
-        State, Type, and the complementary python objects (Pyth)'''
+
+        - four flags
+            Type: object recognition
+            State: jumps onChanged at the loading file
+            OnChanged: faster execute from property and task panels (~7%)
+            Serialize: Slower loading file (~15%) and faster execute (~7%)
+
+        - two lists:
+            Pyth: the complementary python objects
+            faceList: faces produced by the FaceMaker over the base'''
+
+        doc = "The sketch or Dwire in which the SlopedPlanes is based"
 
         slopedPlanes.addProperty("App::PropertyLink", "Base",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "Computes de complement of the orientation of the SlopedPlanes"
+
         slopedPlanes.addProperty("App::PropertyBool", "Complement",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "Reverses the angles of the SlopedPlanes"
+
         slopedPlanes.addProperty("App::PropertyBool", "Reverse",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "Mirrors the SlopedPlanes with respect its base"
+
         slopedPlanes.addProperty("App::PropertyBool", "Mirror",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "Creates a solid out of the SlopedPlanes shells"
+
         slopedPlanes.addProperty("App::PropertyBool", "Solid",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "Gives a plane on SlopedPlanes base"
+
         slopedPlanes.addProperty("App::PropertyBool", "Down",
-                                 "SlopedPlanes")
-        slopedPlanes.addProperty("App::PropertyFloat", "Up",
-                                 "SlopedPlanes")
-        slopedPlanes.addProperty("App::PropertyFloat", "Slope",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "Gives a plane on top of the SlopedPlanes."
+
+        slopedPlanes.addProperty("App::PropertyLength", "Up",
+                                 "SlopedPlanes", doc)
+
+        doc = "Gives a thickness to the SlopedPlanes."
+
+        slopedPlanes.addProperty("App::PropertyLength", "Thickness",
+                                 "SlopedPlanes", doc)
+
+        doc = ('Applies over all planes overhang length,\n'
+               'multiplied by the diagonal \n'
+               'length of the SlopedPlanes base.\n'
+               'It \'s limited to 1')
+
+        slopedPlanes.addProperty("App::PropertyFloatConstraint", "FactorOverhang",
+                                 "SlopedPlanes", doc)
+
+        doc = ('Applies over all planes angles.\n'
+               'To cero the SlopedPlanes hasn\'t shape')
+
+        slopedPlanes.addProperty("App::PropertyAngle", "Slope",
+                                 "SlopedPlanes", doc)
+
+        doc = ('Applies over all planes length, or length of extrusion \n'
+               'of the base\'s edges, multiplied by the diagonal \n'
+               'length of the SlopedPlanes base.\n'
+               'To cero the SlopedPlanes hasn\'t shape')
+
         slopedPlanes.addProperty("App::PropertyFloat", "FactorLength",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = ('Applies over all planes width, left and right,\n'
+               'multiplied by the diagonal length of the SlopedPlanes base.\n'
+               'To cero the plane width is equal to the length of \n'
+               'the related edge of the base')
+
         slopedPlanes.addProperty("App::PropertyFloat", "FactorWidth",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "Tolerance"
+
         slopedPlanes.addProperty("App::PropertyPrecision", "Tolerance",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
+
+        doc = "FaceMaker"
+
         slopedPlanes.addProperty("App::PropertyEnumeration", "FaceMaker",
-                                 "SlopedPlanes")
+                                 "SlopedPlanes", doc)
 
-        self.State = False
+        doc = "Available curves to sweep"
 
-        slopedPlanes.Slope = 45.0
+        slopedPlanes.addProperty("App::PropertyLinkList", "SweepCurves",
+                                 "SlopedPlanes", doc)
+
+        slopedPlanes.addExtension("App::GroupExtensionPython", self)
+
+        self.State = True
+
+        slopedPlanes.Slope = slope
         slopedPlanes.FactorWidth = 1
         slopedPlanes.FactorLength = 2
+        slopedPlanes.FactorOverhang = (0, 0, 1, 0.01)
         slopedPlanes.Up = 0
         slopedPlanes.FaceMaker = ["Part::FaceMakerBullseye",
                                   "Part::FaceMakerSimple",
@@ -112,70 +196,78 @@ class _SlopedPlanes(_Py):
         slopedPlanes.Tolerance = (1e-7, 1e-7, 1, 1e-7)
 
         slopedPlanes.Proxy = self
-        self.Type = "SlopedPlanes"
+
         self.Pyth = []
+        self.faceList = []
+        self.Type = "SlopedPlanes"
+        self.Serialize = True
+        self.OnChanged = True
 
     def execute(self, slopedPlanes):
 
         '''execute(self, slopedPlanes)
-        Builds the shape of the slopedPlanes object'''
-
-        _Py.slopedPlanes = slopedPlanes
+        Builds the shape of the slopedPlanes object.'''
 
         sketch = slopedPlanes.Base
         shape = sketch.Shape.copy()
-        sketchBase = sketch.Placement.Base
-        sketchAxis = sketch.Placement.Rotation.Axis
-        sketchAngle = sketch.Placement.Rotation.Angle
+        placement = sketch.Placement
         shape.Placement = FreeCAD.Placement()
 
-        _Py.tolerance = slopedPlanes.Tolerance
+        _Py.slopedPlanes = slopedPlanes
+        tolerance = slopedPlanes.Tolerance
+        _Py.tolerance = tolerance
+        precision = 1 / tolerance - 1
+        precision = str(precision)
+        precision = precision[:].find('.')
+        _Py.precision = precision
         _Py.reverse = slopedPlanes.Reverse
-
-        slope = slopedPlanes.Slope
-        width = slopedPlanes.FactorWidth
-        length = slopedPlanes.FactorLength
+        _Py.upList = []
 
         faceMaker = slopedPlanes.FaceMaker
-        face = Part.makeFace(shape, faceMaker)
 
-        fList = face.Faces
-        normal = self.faceNormal(fList[0])
-        _Py.normal = normal
+        onChanged = self.OnChanged
+        if not self.faceList:
+            # print 'faceList'
+            onChanged = True
 
-        # gathers the exterior wires. Lower Left criteria
+        if onChanged:
+            # print 'A'
 
-        fFaceOuter = []
-        coordinatesOuter = []
-        for face in fList:
-            outerWire = face.OuterWire
-            falseFace = Part.makeFace(outerWire, "Part::FaceMakerSimple")
-            fFaceOuter.append(falseFace)
-            coordinates = self.faceDatas(falseFace)[1]
-            coordinates.extend(coordinates[0:2])
-            coordinatesOuter.append(coordinates)
+            face = Part.makeFace(shape.Wires, faceMaker)
+            fList = face.Faces
 
-        lowerLeft = [cc[0] for cc in coordinatesOuter]
-        faceList = []
-        falseFaceOuter = []
-        coordinatesOuterOrdered = []
-        while lowerLeft:
-            index = self.lowerLeftPoint(lowerLeft)
-            lowerLeft.pop(index)
-            pop = coordinatesOuter.pop(index)
-            coordinatesOuterOrdered.append(pop)
-            pop = fList.pop(index)
-            faceList.append(pop)
-            pop = fFaceOuter.pop(index)
-            falseFaceOuter.append(pop)
+            # gathers the exterior wires. Lower Left criteria
 
-        # prepares a giant plane
+            coordinatesOuter, geomOuter = [], []
+            for face in fList:
+                outerWire = face.OuterWire
+                falseFace = Part.makeFace(outerWire, "Part::FaceMakerSimple")
+                coordinates, geometryList = self.faceDatas(falseFace)
+                coordinates.extend(coordinates[0:2])
+                coordinatesOuter.append(coordinates)
+                geomOuter.append(geometryList)
 
-        up = slopedPlanes.Up
-        if up:
-            upPlane = Part.makePlane(1e6, 1e6, FreeCAD.Vector(-1e3, -1e3, 0))
-            upPlane.translate(FreeCAD.Vector(0, 0, 1)*up)
-            _Py.upPlane = upPlane
+            lowerLeft = [cc[0] for cc in coordinatesOuter]
+            faceList = []
+            coordinatesOuterOrdered, geomOuterOrdered = [], []
+            while lowerLeft:
+                index = self.lowerLeftPoint(lowerLeft)
+                lowerLeft.pop(index)
+                pop = coordinatesOuter.pop(index)
+                coordinatesOuterOrdered.append(pop)
+                pop = fList.pop(index)
+                faceList.append(pop)
+                pop = geomOuter.pop(index)
+                geomOuterOrdered.append(pop)
+
+            # print 'outer geom ', geomOuterOrdered
+
+            self.faceList = faceList
+
+        else:
+            # print 'B'
+
+            faceList = self.faceList
 
         # procedees face by face and stores them into the Proxy
 
@@ -184,238 +276,296 @@ class _SlopedPlanes(_Py):
         numFace = -1
         for face in faceList:
             numFace += 1
-
-            # elaborates complementary python objects of a face
+            # print '######### numFace ', numFace
 
             size = face.BoundBox.DiagonalLength
             _Py.size = size
             _Py.face = face
 
-            coordinates = coordinatesOuterOrdered[numFace]
-            for pyFace in pyFaceListOld:
-                oldCoord = pyFace.wires[0].coordinates
-                if oldCoord[0] == coordinates[0]:
+            if onChanged:
+                # print 'AA'
+
+                slope = slopedPlanes.Slope.Value
+                try:
+                    slopeList = self.slopeList
+                    mono = False
+                except AttributeError:
+                    mono = True
+                    slopeList = []
+
+                # elaborates complementary python objects of a face
+
+                coordinates = coordinatesOuterOrdered[numFace]
+                for pyFace in pyFaceListOld:
+                    oldCoord = pyFace.wires[0].coordinates
+                    if oldCoord[0] == coordinates[0]:
+                        pyFaceListNew.append(pyFace)
+                        pyFace.numFace = numFace
+                        break
+                else:
+                    pyFace = _PyFace(numFace, mono)
                     pyFaceListNew.append(pyFace)
-                    pyFace.numFace = numFace
-                    break
-            else:
-                pyFace = _PyFace(numFace)
-                pyFaceListNew.append(pyFace)
 
-            _Py.pyFace = pyFace
+                _Py.pyFace = pyFace
+                pyFace.size = size
 
-            # gathers the interior wires. Upper Left criteria
+                # gathers the interior wires. Upper Left criteria
 
-            wList = face.Wires[1:]
-            coordinatesInner = []
-            fFaceList = []
-            for wire in wList:
-                falseFace = Part.makeFace(wire, "Part::FaceMakerSimple")
-                fFaceList.append(falseFace)
-                coord = self.faceDatas(falseFace)[1]
-                coord.extend(coord[0:2])
-                coordinatesInner.append(coord)
+                wList = face.Wires[1:]
 
-            upperLeft = [cc[0] for cc in coordinatesInner]
-            wireList = []
-            falseFaceList = []
-            coordinatesInnerOrdered = []
-            while upperLeft:
-                index = self.upperLeftPoint(upperLeft)
-                upperLeft.pop(index)
-                pop = coordinatesInner.pop(index)
-                coordinatesInnerOrdered.append(pop)
-                pop = wList.pop(index)
-                wireList.append(pop)
-                pop = fFaceList.pop(index)
-                falseFaceList.append(pop)
+                coordinatesInner, geomInner = [], []
+                for wire in wList:
+                    falseFace = Part.makeFace(wire, "Part::FaceMakerSimple")
+                    coord, geomList = self.faceDatas(falseFace)
+                    coord.extend(coord[0:2])
+                    coordinatesInner.append(coord)
+                    geomInner.append(geomList)
 
-            wireList.insert(0, face.OuterWire)
-            falseFaceList.insert(0, falseFaceOuter[numFace])
+                upperLeft = [cc[0] for cc in coordinatesInner]
+                wireList = []
+                coordinatesInnerOrdered, geomInnerOrdered = [], []
+                while upperLeft:
+                    index = self.upperLeftPoint(upperLeft)
+                    upperLeft.pop(index)
+                    pop = coordinatesInner.pop(index)
+                    coordinatesInnerOrdered.append(pop)
+                    pop = wList.pop(index)
+                    wireList.append(pop)
+                    pop = geomInner.pop(index)
+                    geomInnerOrdered.append(pop)
 
-            coordinates = [coordinates]
-            if coordinatesInnerOrdered:
+                # print 'inner geom ', geomInnerOrdered
+
+                wireList.insert(0, face.OuterWire)
+
+                gList = [geomOuterOrdered[numFace]]
+                gList.extend(geomInnerOrdered)
+                # print gList
+
+                coordinates = [coordinates]
                 coordinates.extend(coordinatesInnerOrdered)
 
-            pyWireListOld = pyFace.wires
-            pyWireListNew = []
-            geomShapeFace = []
-            numWire = -1
-            for wire in wireList:
-                numWire += 1
-                coo = coordinates[numWire]
-                brea = False
-                for pyWire in pyWireListOld:
-                    oldCoo = pyWire.coordinates
-                    if oldCoo[0] == coo[0]:
-                        brea = True
-                        if oldCoo != coo:
-                            pyFace.reset = True
-                            if len(oldCoo) != len(coo):
-                                pyWire.reset = True
-                        if brea:
+                if not self.Serialize:
+                    pyFace.reset = True
+
+                pyWireListOld = pyFace.wires
+                pyWireListNew = []
+                geomShapeFace = []
+                numWire = -1
+                for wire, geomWire in zip(wireList, gList):
+                    numWire += 1
+                    # print '###### numWire ', numWire
+                    coo = coordinates[numWire]
+                    for pyWire in pyWireListOld:
+                        oldCoo = pyWire.coordinates
+                        if oldCoo[0] == coo[0]:
+                            # print 'a'
+                            if oldCoo != coo:
+                                # print 'b'
+                                pyFace.reset = True
+                                if len(oldCoo) != len(coo):
+                                    # print 'c'
+                                    pyWire.reset = True
                             pyWireListNew.append(pyWire)
                             pyWire.numWire = numWire
                             break
-                else:
-                    pyWire = _PyWire(numWire)
-                    pyWireListNew.append(pyWire)
-                    pyWire.reset = True
-                    pyFace.reset = True
-                pyWire.coordinates = coo
+                    else:
+                        # print 'd'
+                        pyWire = _PyWire(numWire, mono)
+                        pyWireListNew.append(pyWire)
+                        pyWire.reset = True
+                        pyFace.reset = True
+                    pyWire.coordinates = coo
 
-                falseFace = falseFaceList[numWire]
-                geomWire = self.arcGeometries(falseFace, coo[:-2])
+                    pyPlaneListOld = pyWire.planes
+                    pyPlaneListNew = []
+                    geomShapeWire = []
+                    numGeom = -1
+                    for geom in geomWire:
+                        numGeom += 1
+                        # print '### numGeom ', numGeom
 
-                pyPlaneListOld = pyWire.planes
-                pyPlaneListNew = []
-                geomShapeWire = []
-                numGeom = -1
-                for geom in geomWire:
-                    numGeom += 1
-                    try:
-                        pyPlane = pyPlaneListOld[numGeom]
-                        pyPlaneListNew.append(pyPlane)
-                        pyPlane.numGeom = numGeom
-                        if pyWire.reset:
-                            pyPlane.angle = slope
-                            pyPlane.width = [width, width]
-                            pyPlane.length = length
-                    except IndexError:
-                        pyPlane = _PyPlane(numWire, numGeom)
-                        pyPlaneListNew.append(pyPlane)
+                        try:
+                            ang = slopeList.pop(0)
+                            try:
+                                ang = float(ang)
+                            except ValueError:
+                                ang = slope
+                        except IndexError:
+                            ang = slope
 
-                    # TODO  hay algo que no va bien con el reset
+                        try:
+                            pyPlane = pyPlaneListOld[numGeom]
+                            pyPlaneListNew.append(pyPlane)
+                            pyPlane.numGeom = numGeom
+                            # print '1'
 
-                    pyPlane.geom = geom    # quitar / no quitar
-                    gS = geom.toShape()
-                    pyPlane.geomShape = gS
-                    geomShapeWire.append(gS)
-                    pyPlane.geomAligned = geom
+                            if pyWire.reset:
+                                # print '11'
 
-                pyWire.planes = pyPlaneListNew
-                pyWire.shapeGeom = geomShapeWire
-                geomShapeFace.extend(geomShapeWire)
+                                pyPlane.angle = ang
+                                pyPlane.rightWidth = size
+                                pyPlane.leftWidth = size
+                                pyPlane.length = 2 * size
+                                pyPlane.overhang = 0
+                                pyPlane.sweepCurve = None
 
-            pyFace.shapeGeom = geomShapeFace
-            pyFace.wires = pyWireListNew
+                            if pyFace.reset:
+                                # print '111'
 
-            pyFace.parsing()
+                                pyPlane.rear = []
+                                pyPlane.secondRear = []
+                                pyPlane.under = []
+                                pyPlane.seed = []
+                                pyPlane.seedShape = None
+                                pyPlane.rango = []
+                                pyPlane.aligned = False
+                                pyPlane.arrow = False
+                                pyPlane.choped = False
+                                pyPlane.virtuals = []
+                                pyPlane.reflexed = False
+                                pyPlane.fronted = False
 
-            pyFace.planning()
+                                pyPlane.rightWidth =\
+                                    slopedPlanes.FactorWidth * size
+                                pyPlane.leftWidth =\
+                                    slopedPlanes.FactorWidth * size
+                                pyPlane.length =\
+                                    slopedPlanes.FactorLength * size
+                                pyPlane.overhang =\
+                                    slopedPlanes.FactorOverhang * size
 
-            pyFace.upping()
+                                angle = pyPlane.angle
+                                if isinstance(angle, list):
+                                    angle = self.selectPlane(angle[0],
+                                                             angle[1]).angle
+                                    pyPlane.angle = angle
 
-            pyFace.virtualizing()
+                                pyPlane.lineInto = None
+                                pyPlane.cross = False
 
-            pyFace.trimming()
+                                pyPlane.reflexedList = []
 
-            pyFace.priorLater()
+                        except IndexError:
+                            # print '2'
+                            pyPlane = _PyPlane(numWire, numGeom, ang)
+                            pyPlaneListNew.append(pyPlane)
 
-            pyFace.simulating()
+                        pyPlane.geom = geom
+                        gS = geom.toShape()
+                        pyPlane.geomShape = gS
+                        pyPlane.geomAligned = gS
+                        geomShapeWire.append(gS)
 
-            pyFace.preOrdinaries()
+                        pyPlane.control = [numGeom]
+                        pyPlane.solved = False
+                        pyPlane.reallySolved = False
 
-            pyFace.preReflexs()
+                        pyPlane.alignedList = []
+                        pyPlane.chopedList = []
+                        pyPlane.frontedList = []
+                        pyPlane.rearedList = []
 
-            # pyFace.reVirtualizing()
+                    pyWire.planes = pyPlaneListNew
 
-            pyFace.reflexing()
+                    pyWire.shapeGeom = geomShapeWire
+                    pyWire.wire = wire
+                    geomShapeFace.extend(geomShapeWire)
 
-            pyFace.reviewing()
+                pyFace.shapeGeom = geomShapeFace
+                pyFace.wires = pyWireListNew
 
-            pyFace.rearing()
+            else:
+                # print 'BB'
 
-            pyFace.ordinaries()
+                pyFace = self.Pyth[numFace]
+                _Py.pyFace = pyFace
+                # print(pyFace.mono)
+                for pyWire in pyFace.wires:
+                    # print(pyWire.mono)
+                    pyWire.wire = Part.Wire(pyWire.shapeGeom)
 
-            pyFace.betweenWires()
+                    for pyPlane in pyWire.planes:
+                        pyPlane.geomAligned = pyPlane.geomShape
+                        pyPlane.control = [pyPlane.numGeom]
+                        pyPlane.solved = False
+                        pyPlane.reallySolved = False
 
-            pyFace.aligning()
+                        pyPlane.alignedList = []
+                        pyPlane.chopedList = []
+                        pyPlane.frontedList = []
+                        pyPlane.rearedList = []
 
-            pyFace.ending()
+            pyFace.faceManager()
 
-        self.Pyth = pyFaceListNew
+        if onChanged:
+            # print 'AAA'
+            self.Pyth = pyFaceListNew
+        else:
+            # print 'BBB'
+            pyFaceListNew = self.Pyth
+
+        self.OnChanged = True
 
         # elaborates a list of planes for every face
 
+        # print 'pyFaceListNew ', pyFaceListNew
+
         figList = []
         for pyFace in pyFaceListNew:
+            # print pyFace.numFace
+            numFace = pyFace.numFace
             secondaries = []
             planeFaceList = []
             originList = []
-            pyWireList = pyFace.wires
             wireList = []
-            for pyWire in pyWireList:
+            for pyWire in pyFace.wires:
+                # print pyWire.numWire
                 numWire = pyWire.numWire
                 planeWireList = []
                 for pyPlane in pyWire.planes:
+                    # print pyPlane.numGeom
                     numAngle = pyPlane.numGeom
                     angle = pyPlane.angle
+                    # print 'angle ', angle
 
-                    # some figures (a few of them) break the planes numeration
-                    '''
-                    print 'numGeom ', numAngle
-                    plane = pyPlane.shape
-                    gS = pyPlane.geomShape
-                    print (gS.firstVertex(True).Point,
-                           gS.lastVertex(True).Point)
-                    if plane:
-                        section = plane.section(gS)
-                        if section.Edges:
-                            print 'okey'
-                        else:
-                            print 'bad'
-                    else:
-                        print 'no plane'
-                    '''
-                    # TODO "solution" at task panel
+                    if pyPlane.length:
 
-                    if [numWire, numAngle] not in originList:
+                        if [numWire, numAngle] not in originList:
 
-                        if isinstance(angle, float):
-                            # print 'a'
+                            if isinstance(angle, float):
+                                # print 'a'
 
-                            plane = pyPlane.shape
+                                plane = pyPlane.shape
 
-                            if isinstance(plane, Part.Compound):
-                                # print 'compound'
-                                planeWireList.append(plane.Faces[0])
-                                secondaries.extend(plane.Faces[1:])
+                                if isinstance(plane, Part.Compound):
+                                    # print 'a1'
+                                    planeWireList.append(plane.Faces[0])
+                                    secondaries.extend(plane.Faces[1:])
+
+                                else:
+                                    # print 'a2'
+                                    planeWireList.append(plane)
+
+                                originList.append([numWire, numAngle])
 
                             else:
-                                planeWireList.append(plane)
+                                if angle not in originList:
+                                    # print 'b'
 
-                        else:
-                            # print 'b'
+                                    pyPl =\
+                                        pyFace.selectPlane(angle[0], angle[1],
+                                                           pyFace)
+                                    planeWireList.append(pyPl.shape)
 
-                            alfa, beta = angle[0], angle[1]
+                                    originList.append(angle)
 
-                            if [alfa, beta] not in originList:
-                                originList.append([alfa, beta])
+                    # print 'originList ', originList
 
-                                if alfa == numWire:
-                                    if beta > numAngle:
-                                        pyPl = pyFace.selectPlane(alfa, beta)
-                                        pl = pyPl.shape
-                                        planeWireList.append(pl)
-
-                                elif alfa > numWire:
-                                    pyPl = pyFace.selectPlane(alfa, beta)
-                                    pl = pyPl.shape
-                                    planeWireList.append(pl)
-
-                                elif alfa < numWire:
-                                    pass
-
-                if up:
-                    upPlaneCopy = upPlane.copy()
+                if slopedPlanes.Up:
+                    upPlaneCopy = _Py.upList[numFace].copy()
                     cut = upPlaneCopy.cut(planeWireList, _Py.tolerance)
                     edgeList = cut.Edges[4:]
-                    if numWire > 0:     # this doesn't seem to be necessary
-                        for edge in edgeList:
-                            edge.reverse()
-                        edgeList.reverse()
-                        pass
                     wire = Part.Wire(edgeList)
                     wireList.append(wire)
 
@@ -423,65 +573,77 @@ class _SlopedPlanes(_Py):
 
             planeFaceList.extend(secondaries)
 
-            if up:
+            if slopedPlanes.Up:
+                # print 'Up'
                 upFace = Part.makeFace(wireList, faceMaker)
-
-                # hay que comprobar para cada interior wire que realmente corta
-                # o diseñar otra solución para evitar open wires. Mirar cut
 
                 planeFaceList.append(upFace)
 
-                # the Up System break the interior wires numeration
-                # first give the angles and later apply Up
+            if not slopedPlanes.Mirror:
+                if slopedPlanes.Down:
+                    # print 'Down'
+                    face = faceList[numFace].copy()
+                    planeFaceList.append(face)
 
-            if slopedPlanes.Down:
-                face = faceList[numFace]
-                planeFaceList.append(face)
-
-            if slopedPlanes.Mirror:
+            else:
+                # print 'mirror'
                 shell = Part.makeShell(planeFaceList)
                 mirror = shell.mirror(FreeCAD.Vector(0, 0, 0),
                                       FreeCAD.Vector(0, 0, -1))
                 planeFaceList.extend(mirror.Faces)
 
             for plane in planeFaceList:
-                plane.rotate(FreeCAD.Vector(0, 0, 0), sketchAxis,
-                             degrees(sketchAngle))
-                plane.translate(sketchBase)
+                plane.Placement = placement.multiply(plane.Placement)
 
-            figList.append(planeFaceList)
+            figList.extend(planeFaceList)
 
-        # makes a shell for every planes list, compunds them, and the end
+        endShape = Part.makeShell(figList)
 
-        shellList = []
-        for planeList in figList:
-            shell = Part.makeShell(planeList)
-            shellList.append(shell)
+        if slopedPlanes.Group:
+            for obj in slopedPlanes.Group:
+                if hasattr(obj, "Proxy"):
+                    if obj.Proxy.Type == "SlopedPlanes":
+                        childShape = obj.Shape.copy()
 
-        endShape = Part.makeCompound(shellList)
+                        common = endShape.common([childShape], tolerance)
+
+                        if common.Area:
+
+                            endShape = endShape.cut([common], tolerance)
+                            childShape = childShape.cut([common], tolerance)
+
+                        shell = Part.Shell(endShape.Faces + childShape.Faces)
+                        shell = shell.removeSplitter()
+                        endShape = shell
 
         if not slopedPlanes.Complement:
             endShape.complement()
 
+        if slopedPlanes.Thickness:
+            normal = self.faceNormal(faceList[0])
+            if slopedPlanes.Reverse:
+                normal = normal * -1
+            endShape = endShape.extrude(slopedPlanes.Thickness.Value * normal)
+
         if slopedPlanes.Solid:
             endShape = Part.makeSolid(endShape)
 
-        # endShape.removeInternalWires(True)
+        endShape.removeInternalWires(True)
 
         slopedPlanes.Shape = endShape
 
     def onChanged(self, slopedPlanes, prop):
 
-        '''onChanged(self, slopedPlanes, prop)
-        '''
+        '''onChanged(self, slopedPlanes, prop)'''
 
         if self.State:
+
             return
 
         if prop == "Slope":
 
             slope = slopedPlanes.Slope
-            value = slope
+            value = slope.Value
             prop = "angle"
             self.overWritePyProp(prop, value)
 
@@ -495,58 +657,164 @@ class _SlopedPlanes(_Py):
         elif prop == "FactorWidth":
 
             width = slopedPlanes.FactorWidth
-            value = (width, width)
+            value = width
             prop = "width"
             self.overWritePyProp(prop, value)
 
+        elif prop == "FactorOverhang":
+
+            overhang = slopedPlanes.FactorOverhang
+            value = overhang
+            prop = "overhang"
+            self.overWritePyProp(prop, value)
+
+        elif prop == "Reverse":
+
+            value = None
+            prop = "seedShape"
+            self.overWritePyProp(prop, value)
+
+        elif prop == "SweepCurves":
+
+            curvesList = slopedPlanes.SweepCurves
+
+            for pyFace in self.Pyth:
+                for pyWire in pyFace.wires:
+                    for pyPlane in pyWire.planes:
+                        sw = pyPlane.sweepCurve
+                        if sw:
+                            if sw not in curvesList:
+                                pyPlane.sweepCurve = None
+
     def overWritePyProp(self, prop, value):
 
-        '''overWritePyProp(self, prop, value)
-        '''
+        '''overWritePyProp(self, prop, value)'''
 
         for pyFace in self.Pyth:
-            for pyWire in pyFace.wires:
-                for pyPlane in pyWire.planes:
-                    setattr(pyPlane, prop, value)
+
+            size = pyFace.size
+
+            if prop in ["length", "width", "overhang"]:
+                newValue = value * size
+            else:
+                newValue = value
+                if prop == "angle":
+                    pyFace.mono = True
+
+            if prop == "width":
+
+                for pyWire in pyFace.wires:
+                    for pyPlane in pyWire.planes:
+                        setattr(pyPlane, "leftWidth", newValue)
+                        setattr(pyPlane, "rightWidth", newValue)
+
+            else:
+
+                for pyWire in pyFace.wires:
+                    if prop == "angle":
+                        pyWire.mono = True
+                    for pyPlane in pyWire.planes:
+                        setattr(pyPlane, prop, newValue)
+
+        self.OnChanged = False
+
+    def onDocumentRestored(self, slopedPlanes):
+
+        ''''''
+
+        tolerance = slopedPlanes.Tolerance
+        slopedPlanes.Tolerance = (tolerance, 1e-7, 1, 1e-7)
+
+        factorOverhang = slopedPlanes.FactorOverhang
+        slopedPlanes.FactorOverhang = (factorOverhang, 0, 1, 0.01)
 
     def __getstate__(self):
 
-        ''''''
+        '''__getstate__(self)'''
 
         state = dict()
 
         state['Type'] = self.Type
 
+        serialize = self.Serialize
+        state['Serialize'] = serialize
+
+        faceList = self.faceList
+
         pyth = []
+        numFace = -1
         for pyFace in self.Pyth:
+            numFace += 1
             dct = pyFace.__dict__.copy()
-            wires, alignments = pyFace.__getstate__()
-            dct['_wires'], dct['_alignments'] = wires, alignments
+            wires, alignments, serials = pyFace.__getstate__(serialize)
             dct['_shapeGeom'] = []
+            dct['_wires'] = wires
+            dct['_alignments'] = alignments
+            if serialize:
+                face = faceList[numFace]
+                # print 'serials ', serials
+                # print 'face ', face
+                serials = Part.makeCompound([face] + serials)
+                dct['_serials'] = serials.exportBrepToString()
+            else:
+                if '_serials' in dct:
+                    del dct['_serials']
             pyth.append(dct)
         state['Pyth'] = pyth
+
+        # print 'state ', state
 
         return state
 
     def __setstate__(self, state):
 
-        ''''''
+        '''__setstate__(self, state)'''
 
         self.Type = state['Type']
 
+        serialize = state['Serialize']
+
+        faceList = []
         pyth = []
         numFace = -1
         for dct in state['Pyth']:
             numFace += 1
             pyFace = _PyFace(numFace)
-            wires, alignments = dct['_wires'], dct['_alignments']
-            wires, alignments = pyFace.__setstate__(wires, alignments)
-            dct['_wires'], dct['_alignments'] = wires, alignments
+
+            wires = dct['_wires']
+            alignments = dct['_alignments']
+
+            if serialize:
+                compound = Part.Compound([])
+                compound.importBrepFromString(dct['_serials'])
+                face = compound.Faces[0]
+                faceList.append(face)
+                compound = compound.removeShape([face])
+
+            else:
+                compound = None
+
+            wires, alignments, geomShapeFace =\
+                pyFace.__setstate__(wires, alignments, serialize, compound)
+
+            dct['_wires'] = wires
+            dct['_alignments'] = alignments
+            dct['_shapeGeom'] = geomShapeFace
             pyFace.__dict__ = dct
             pyth.append(pyFace)
         self.Pyth = pyth
+        self.faceList = faceList
 
+        self.Serialize = serialize
         self.State = True
+
+        if serialize:
+            self.OnChanged = False
+            # if the geometry change after loading, recompute
+        else:
+            self.OnChanged = True
+
+        # self.printSerialSummary()
 
 
 class _ViewProvider_SlopedPlanes():
@@ -555,65 +823,68 @@ class _ViewProvider_SlopedPlanes():
 
     def __init__(self, vobj):
 
-        ''''''
+        '''__init__(self, vobj)'''
 
+        vobj.addExtension("Gui::ViewProviderGroupExtensionPython", self)
         vobj.Proxy = self
 
     def getIcon(self):
 
-        ''''''
+        '''getIcon(self)'''
 
-        pth = path.dirname(__file__)
-        return pth + "/SlopedPlanes_Tree.svg"
+        return path.dirname(__file__) + "/SlopedPlanes_Tree.svg"
 
     def getDefaultDisplayMode(self):
 
-        ''''''
+        '''getDefaultDisplayMode(self)'''
 
         return "FlatLines"
 
     def __getstate__(self):
 
-        ''''''
+        '''__getstate__(self)'''
 
         return None
 
     def __setstate__(self, state):
 
-        ''''''
+        '''__setstate__(self, state)'''
 
         return None
 
     def attach(self, vobj):
 
-        ''''''
+        '''attach(self, vobj)'''
 
         self.Object = vobj.Object
-
         obj = self.Object
         obj.Proxy.State = False
 
     def claimChildren(self):
 
-        ''''''
+        '''claimChildren(self)'''
 
         obj = self.Object
-        base = obj.Base
-        return [base]
+        group = obj.Group
+        for oo in group:
+            if hasattr(oo, 'Proxy'):
+                if oo.Proxy.Type == 'SlopedPlanes':
+                    oo.ViewObject.Visibility = False
+        return [obj.Base] + group
 
     def unsetEdit(self, vobj, mode):
 
-        ''''''
+        '''unsetEdit(self, vobj, mode)'''
 
         FreeCADGui.Control.closeDialog()
         return
 
     def setEdit(self, vobj, mode=0):
 
-        ''''''
+        '''setEdit(self, vobj, mode=0)'''
 
-        taskd = _TaskPanel_SlopedPlanes()
-        taskd.obj = self.Object
+        taskd = _TaskPanel_SlopedPlanes(self.Object)
+        self.task = taskd
         taskd.update()
         FreeCADGui.Control.showDialog(taskd)
         return True
